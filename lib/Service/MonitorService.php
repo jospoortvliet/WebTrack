@@ -335,13 +335,25 @@ class MonitorService {
      * @param array<array<string,string>> $newEntries
      */
     private function processNewEntries(Monitor $monitor, array $newEntries): void {
-        // Fetch the Tables column schema once (if configured) to avoid N requests.
+        // Fetch (or auto-create) the Tables column schema once per check cycle.
         $tableColumns = [];
         if ($monitor->getTablesTableId() !== null) {
             try {
                 $tableColumns = $this->tablesService->getColumns($monitor->getTablesTableId());
+                // If the table exists but has no columns yet, bootstrap the PR
+                // Coverage schema automatically so the first match writes a row.
+                if ($tableColumns === []) {
+                    $this->logger->info('[webtrack] Table {id} has no columns — creating PR Coverage schema', [
+                        'id' => $monitor->getTablesTableId(),
+                    ]);
+                    $this->tablesService->ensurePrCoverageColumns(
+                        $monitor->getTablesTableId(),
+                        $monitor->getUserId(),
+                    );
+                    $tableColumns = $this->tablesService->getColumns($monitor->getTablesTableId());
+                }
             } catch (\Throwable $e) {
-                $this->logger->warning('[webtrack] Could not load Tables columns for monitor {id}: {err}', [
+                $this->logger->warning('[webtrack] Could not load/init Tables columns for monitor {id}: {err}', [
                     'id'  => $monitor->getId(),
                     'err' => $e->getMessage(),
                 ]);
@@ -354,7 +366,12 @@ class MonitorService {
             $body         = $entry['content'];
             $pubDate      = $entry['pubDate']      ?? '';
             $channelTitle = $entry['channelTitle'] ?? '';   // YouTube search only
-            $combined     = $title . ' ' . strip_tags($body);
+
+            // $combinedForSnippet: title + body text — used for snippet extraction
+            // and custom-source keyword matching.  Kept separate so that the
+            // negative-keyword filter below (which appends the raw URL) does not
+            // corrupt the snippet with e.g. long Google News base64 IDs.
+            $combinedForSnippet = $title . ' ' . strip_tags($body);
 
             // Relevance filter:
             //   - custom: apply full boost/exclude scoring against configured threshold
@@ -370,11 +387,12 @@ class MonitorService {
                     continue;
                 }
             } else {
-                // For feed/API sources: only apply negative-keyword (exclude) filtering
-                $combined = mb_strtolower($title . ' ' . $url);
-                $excluded = false;
+                // For feed/API sources: only apply negative-keyword (exclude) filtering.
+                // Use a separate local variable so $combinedForSnippet stays clean.
+                $filterText = mb_strtolower($title . ' ' . $url);
+                $excluded   = false;
                 foreach ($monitor->getExcludePatternsArray() as $pattern) {
-                    if ($pattern !== '' && str_contains($combined, mb_strtolower($pattern))) {
+                    if ($pattern !== '' && str_contains($filterText, mb_strtolower($pattern))) {
                         $this->logger->debug('[webtrack] entry skipped (negative keyword "{p}"): {title}', [
                             'p'     => $pattern,
                             'title' => mb_substr($title, 0, 80),
@@ -388,15 +406,15 @@ class MonitorService {
                 }
             }
 
-            $snippet = $this->snippetService->findSnippet($combined, $monitor->getKeyword(), $monitor->getUseRegex());
+            $snippet = $this->snippetService->findSnippet($combinedForSnippet, $monitor->getKeyword(), $monitor->getUseRegex());
             if ($snippet !== null) {
                 $monitor->setLastFoundAt((new \DateTimeImmutable())->format(\DateTimeInterface::ATOM));
                 $monitor->setStatus('found');
-                $this->notificationService->notifyFound($monitor, $snippet);
+                $this->notificationService->notifyFound($monitor, $snippet, $url);
                 $this->logEvent($monitor, 'found', $snippet);
 
                 if ($monitor->getTablesTableId() !== null && $tableColumns !== []) {
-                    $this->insertTablesRow($monitor, $tableColumns, $url, $title, $pubDate, $channelTitle);
+                    $this->insertTablesRow($monitor, $tableColumns, $url, $title, $pubDate, $body, $channelTitle);
                 }
             }
         }
@@ -414,6 +432,7 @@ class MonitorService {
         string  $url,
         string  $title,
         string  $pubDate,
+        string  $body         = '',
         string  $channelTitle = '',
     ): void {
         try {
@@ -448,6 +467,7 @@ class MonitorService {
                 entryUrl:     $url,
                 title:        $title,
                 pubDate:      $pubDate,
+                body:         $body,
                 campaignId:   $monitor->getTablesCampaignId(),
                 channelTitle: $channelTitle,
             );

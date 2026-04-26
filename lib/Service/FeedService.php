@@ -62,7 +62,9 @@ class FeedService {
         // RSS feed
         $items = $doc->channel->item ?? $doc->item ?? [];
         foreach ($items as $item) {
-            $id      = (string) ($item->guid ?? $item->link ?? '');
+            // Prefer <link> (full URL) over <guid> — Google News guids are bare
+            // base64 IDs without a scheme, not clickable links.
+            $id      = (string) ($item->link ?? $item->guid ?? '');
             $title   = (string) ($item->title ?? '');
             $content = (string) ($item->description ?? '');
             $pubDate = (string) ($item->pubDate ?? $item->pubdate ?? '');
