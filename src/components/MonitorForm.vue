@@ -3,47 +3,21 @@
         <div class="wn-form-container">
             <h2 class="wn-form-title">{{ title }}</h2>
 
-            <!-- ── Basic info ── -->
+            <!-- ── Source type — always first ── -->
             <fieldset class="wn-form-section">
+                <legend>{{ t('webtrack', 'Source') }}</legend>
 
                 <div class="wn-form-row">
-                    <label for="wn-name">{{ t('webtrack', 'Name') }} *</label>
-                    <input id="wn-name" v-model.trim="form.name" type="text"
-                        :placeholder="t('webtrack', 'My monitor')" @keydown.enter.prevent />
-                </div>
-
-                <div class="wn-form-row">
-                    <label for="wn-url">{{ t('webtrack', 'URL') }} *</label>
-                    <input id="wn-url" v-model.trim="form.url" type="url"
-                        :placeholder="t('webtrack', 'https://example.com/feed.rss')"
-                        @blur="onUrlBlur" @keydown.enter.prevent />
-                    <span v-if="urlTesting" class="wn-form-hint">
-                        {{ t('webtrack', 'Testing URL…') }}
-                        <span class="wn-inline-spinner" />
-                    </span>
-                    <span v-else-if="urlTestResult" class="wn-form-hint wn-form-hint--success">
-                        {{ urlTestResult.isFeed
-                            ? t('webtrack', '✓ RSS/Atom feed detected')
-                            : t('webtrack', '✓ Page reachable') }}
-                    </span>
-                    <span v-else-if="urlTestError" class="wn-error-text">{{ urlTestError }}</span>
-                    <div v-if="urlTestResult && urlTestResult.preview" class="wn-preview-box">{{ urlTestResult.preview }}</div>
-                </div>
-            </fieldset>
-
-            <!-- ── Source type ── -->
-            <fieldset class="wn-form-section">
-                <legend>{{ t('webtrack', 'Source type') }}</legend>
-
-                <div class="wn-form-row">
-                    <label for="wn-source-type">{{ t('webtrack', 'Source') }}</label>
-                    <select id="wn-source-type" v-model="form.sourceType">
-                        <option value="custom">{{ t('webtrack', 'Custom URL') }}</option>
+                    <label for="wn-source-type">{{ t('webtrack', 'Source type') }}</label>
+                    <select id="wn-source-type" v-model="form.sourceType" @change="onSourceTypeChange">
                         <option value="google_news">{{ t('webtrack', 'Google News RSS') }}</option>
-                        <option value="youtube">{{ t('webtrack', 'YouTube') }}</option>
+                        <option value="youtube_search">{{ t('webtrack', 'YouTube — search all') }}</option>
+                        <option value="youtube">{{ t('webtrack', 'YouTube — single channel') }}</option>
+                        <option value="custom">{{ t('webtrack', 'Custom URL') }}</option>
                     </select>
                 </div>
 
+                <!-- Language/region — Google News only -->
                 <div v-if="form.sourceType === 'google_news'" class="wn-form-row">
                     <label for="wn-source-lang">{{ t('webtrack', 'Language / region') }}</label>
                     <select id="wn-source-lang" v-model="form.sourceLanguage">
@@ -62,54 +36,127 @@
                         <option value="fi-FI">Suomi – FI</option>
                         <option value="ja-JP">日本語 – JP</option>
                     </select>
+                </div>
+
+                <!-- YouTube search — API key warning -->
+                <div v-if="form.sourceType === 'youtube_search'" class="wn-form-row">
+                    <p v-if="!youtubeApiKeySet" class="wn-error-text">
+                        {{ t('webtrack', 'A YouTube Data API v3 key is required. Add it in Settings below.') }}
+                    </p>
+                    <p v-else class="wn-form-hint wn-form-hint--success">
+                        {{ t('webtrack', '✓ YouTube API key configured') }}
+                    </p>
+                </div>
+
+                <!-- Channel ID — single-channel YouTube only -->
+                <div v-if="form.sourceType === 'youtube'" class="wn-form-row">
+                    <label for="wn-yt-channel">{{ t('webtrack', 'Channel ID') }} *</label>
+                    <input id="wn-yt-channel" v-model.trim="form.youtubeChannelId" type="text"
+                        placeholder="UCxxxxxxxxxxxxxxxxxxxxxx"
+                        @keydown.enter.prevent />
                     <span class="wn-form-hint">
-                        {{ t('webtrack', 'Used as hl/gl parameters for the Google News feed URL') }}
+                        {{ t('webtrack', 'The YouTube channel ID (starts with UC…). Find it in the channel URL.') }}
                     </span>
+                </div>
+
+                <!-- Custom URL — only for custom source type -->
+                <div v-if="form.sourceType === 'custom'" class="wn-form-row">
+                    <label for="wn-url">{{ t('webtrack', 'URL') }} *</label>
+                    <input id="wn-url" v-model.trim="form.url" type="url"
+                        :placeholder="t('webtrack', 'https://example.com/feed.rss')"
+                        @blur="onUrlBlur" @keydown.enter.prevent />
+                    <span v-if="urlTesting" class="wn-form-hint">
+                        {{ t('webtrack', 'Testing URL…') }}
+                        <span class="wn-inline-spinner" />
+                    </span>
+                    <span v-else-if="urlTestResult" class="wn-form-hint wn-form-hint--success">
+                        {{ urlTestResult.isFeed
+                            ? t('webtrack', '✓ RSS/Atom feed detected')
+                            : t('webtrack', '✓ Page reachable') }}
+                    </span>
+                    <span v-else-if="urlTestError" class="wn-error-text">{{ urlTestError }}</span>
+                    <div v-if="urlTestResult && urlTestResult.preview" class="wn-preview-box">{{ urlTestResult.preview }}</div>
+                </div>
+            </fieldset>
+
+            <!-- ── Basic info ── -->
+            <fieldset class="wn-form-section">
+                <div class="wn-form-row">
+                    <label for="wn-name">{{ t('webtrack', 'Name') }} *</label>
+                    <input id="wn-name" v-model.trim="form.name" type="text"
+                        :placeholder="t('webtrack', 'My monitor')" @keydown.enter.prevent />
                 </div>
             </fieldset>
 
             <!-- ── Keyword matching ── -->
             <fieldset class="wn-form-section">
-                <legend>{{ t('webtrack', 'Matching') }}</legend>
+                <legend>{{ t('webtrack', 'Keywords') }}</legend>
 
                 <div class="wn-form-row">
-                    <label for="wn-keyword">{{ t('webtrack', 'Keyword') }} *</label>
+                    <label for="wn-keyword">
+                        {{ isAutoUrl
+                            ? t('webtrack', 'Keyword to detect') + ' *'
+                            : t('webtrack', 'Keyword') + ' *' }}
+                    </label>
                     <input id="wn-keyword" v-model.trim="form.keyword" type="text"
-                        :placeholder="form.useRegex ? t('webtrack', 'breaking\\s+news|alert') : t('webtrack', 'breaking news')" @keydown.enter.prevent />
+                        :placeholder="form.useRegex
+                            ? t('webtrack', 'breaking\\s+news|alert')
+                            : t('webtrack', 'Nextcloud')"
+                        @keydown.enter.prevent />
+                    <span v-if="isAutoUrl" class="wn-form-hint">
+                        {{ form.sourceType === 'google_news'
+                            ? t('webtrack', 'Also used as the main search term in the Google News URL.')
+                            : t('webtrack', 'Matched against video titles from the channel.') }}
+                    </span>
                 </div>
 
-                <div class="wn-form-row wn-form-checkbox">
+                <!-- Regex toggle — custom URL only (auto-URL sources match titles literally) -->
+                <div v-if="!isAutoUrl" class="wn-form-row wn-form-checkbox">
                     <input id="wn-regex" v-model="form.useRegex" type="checkbox" />
                     <label for="wn-regex">{{ t('webtrack', 'Use regular expression') }}</label>
                 </div>
 
-                <!-- Relevance scoring — shown for feed sources -->
-                <template v-if="form.sourceType !== 'custom'">
-                    <div class="wn-form-row">
-                        <label for="wn-score">{{ t('webtrack', 'Minimum relevance score') }}</label>
-                        <input id="wn-score" v-model.number="form.scoreThreshold" type="number"
-                            min="0" max="20" step="1" style="width:5em" />
-                        <span class="wn-form-hint">
-                            {{ t('webtrack', 'Each matching boost keyword adds +1; each exclude pattern subtracts 2.') }}
-                        </span>
-                    </div>
+                <!-- Positive keywords — Google News: extra search terms; custom: boost scoring -->
+                <div v-if="form.sourceType !== 'youtube'" class="wn-form-row">
+                    <label for="wn-boost">{{ t('webtrack', 'Positive keywords') }}</label>
+                    <input id="wn-boost" v-model="boostKeywordsRaw" type="text"
+                        :placeholder="t('webtrack', 'open source, privacy, self-hosted')"
+                        @keydown.enter.prevent />
+                    <span class="wn-form-hint">
+                        {{ form.sourceType === 'google_news'
+                            ? t('webtrack', 'Comma-separated. Added as extra search terms in the Google News URL.')
+                            : t('webtrack', 'Comma-separated. Each match raises the relevance score by 1.') }}
+                    </span>
+                </div>
 
-                    <div class="wn-form-row">
-                        <label for="wn-boost">{{ t('webtrack', 'Boost keywords') }}</label>
-                        <input id="wn-boost" v-model="boostKeywordsRaw" type="text"
-                            :placeholder="t('webtrack', 'nextcloud, open source, privacy')"
-                            @keydown.enter.prevent />
-                        <span class="wn-form-hint">{{ t('webtrack', 'Comma-separated. Each match raises the score by 1.') }}</span>
-                    </div>
+                <!-- Negative keywords — Google News: excluded from URL; others: filter items -->
+                <div class="wn-form-row">
+                    <label for="wn-exclude">{{ t('webtrack', 'Negative keywords') }}</label>
+                    <input id="wn-exclude" v-model="excludePatternsRaw" type="text"
+                        :placeholder="t('webtrack', 'shorts, live, reaction')"
+                        @keydown.enter.prevent />
+                    <span class="wn-form-hint">
+                        {{ form.sourceType === 'google_news'
+                            ? t('webtrack', 'Comma-separated. Excluded from the Google News search (prepended with -).')
+                            : t('webtrack', 'Comma-separated. Items whose title or URL contains these are skipped.') }}
+                    </span>
+                </div>
 
-                    <div class="wn-form-row">
-                        <label for="wn-exclude">{{ t('webtrack', 'Exclude patterns') }}</label>
-                        <input id="wn-exclude" v-model="excludePatternsRaw" type="text"
-                            :placeholder="t('webtrack', 'reddit, forum, stackoverflow')"
-                            @keydown.enter.prevent />
-                        <span class="wn-form-hint">{{ t('webtrack', 'Comma-separated URL/title substrings. Each match lowers the score by 2.') }}</span>
-                    </div>
-                </template>
+                <!-- Relevance score — custom URL only -->
+                <div v-if="!isAutoUrl" class="wn-form-row">
+                    <label for="wn-score">{{ t('webtrack', 'Minimum relevance score') }}</label>
+                    <input id="wn-score" v-model.number="form.scoreThreshold" type="number"
+                        min="0" max="20" step="1" style="width:5em" />
+                    <span class="wn-form-hint">
+                        {{ t('webtrack', 'Each positive keyword match adds +1; each negative keyword match subtracts 2.') }}
+                    </span>
+                </div>
+
+                <!-- Generated feed URL preview -->
+                <div v-if="feedPreviewUrl" class="wn-form-row">
+                    <label>{{ t('webtrack', 'Generated feed URL') }}</label>
+                    <div class="wn-preview-box wn-preview-url">{{ feedPreviewUrl }}</div>
+                </div>
             </fieldset>
 
             <!-- ── Schedule & notifications ── -->
@@ -206,8 +253,9 @@ export default {
     name: 'MonitorForm',
     components: { NcModal, NcButton },
     props: {
-        monitor:   { type: Object, default: null },
-        talkRooms: { type: Array, default: () => [] },
+        monitor:          { type: Object,  default: null },
+        talkRooms:        { type: Array,   default: () => [] },
+        youtubeApiKeySet: { type: Boolean, default: false },
     },
     emits: ['saved', 'close'],
 
@@ -223,9 +271,11 @@ export default {
                 isFeed:           m ? m.isFeed           : false,
                 talkRoomToken:    m ? (m.talkRoomToken || '') : '',
                 // Source configuration
-                sourceType:       m ? (m.sourceType    || 'custom') : 'custom',
+                sourceType:       m ? (m.sourceType    || 'google_news') : 'google_news',
                 sourceLanguage:   m ? (m.sourceLanguage || 'en-US') : 'en-US',
-                // Relevance scoring
+                // YouTube: channel ID extracted from stored URL on edit
+                youtubeChannelId: m ? this.extractYouTubeChannelId(m.url) : '',
+                // Relevance scoring — only meaningful for custom URL monitors
                 scoreThreshold:   m ? (m.scoreThreshold ?? 2) : 2,
                 // Tables integration
                 tablesTableId:    m ? (m.tablesTableId    || null) : null,
@@ -233,7 +283,7 @@ export default {
             },
             // Boost/exclude stored as comma-separated strings in the UI
             boostKeywordsRaw:   m && m.boostKeywords   ? m.boostKeywords.join(', ')   : '',
-            excludePatternsRaw: m && m.excludePatterns ? m.excludePatterns.join(', ') : 'reddit, forum, stackoverflow',
+            excludePatternsRaw: m && m.excludePatterns ? m.excludePatterns.join(', ') : '',
 
             errors:        [],
             saving:        false,
@@ -261,6 +311,40 @@ export default {
         campaignOptions() {
             const col = this.tableColumns.find(c => c.title.toLowerCase().includes('campaign'))
             return col?.selectionOptions ?? []
+        },
+        /** True for source types where the URL is auto-built (no manual URL field). */
+        isAutoUrl() {
+            return ['google_news', 'youtube', 'youtube_search'].includes(this.form.sourceType)
+        },
+        /** Live preview of the auto-built feed URL (Google News or YouTube). */
+        feedPreviewUrl() {
+            const type = this.form.sourceType
+            if (type === 'google_news') {
+                const terms = []
+                const kw = this.form.keyword.trim()
+                if (kw) terms.push(kw)
+                this.splitRaw(this.boostKeywordsRaw).forEach(k => { if (k) terms.push(k) })
+                this.splitRaw(this.excludePatternsRaw).forEach(k => { if (k) terms.push('-' + k) })
+                if (!terms.length) return ''
+                const q    = terms.map(encodeURIComponent).join('+')
+                const lang = this.form.sourceLanguage || 'en-US'
+                const parts = lang.split('-')
+                const hl   = lang
+                const gl   = (parts[1] || parts[0]).toUpperCase()
+                const ceid = gl + ':' + parts[0].toLowerCase()
+                return `https://news.google.com/rss/search?q=${q}&hl=${hl}&gl=${gl}&ceid=${ceid}`
+            }
+            if (type === 'youtube') {
+                const ch = this.form.youtubeChannelId.trim()
+                if (!ch) return ''
+                return `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(ch)}`
+            }
+            if (type === 'youtube_search') {
+                const kw = this.form.keyword.trim()
+                if (!kw) return ''
+                return `YouTube Data API v3 — search: "${kw}"`
+            }
+            return ''
         },
     },
 
@@ -299,6 +383,20 @@ export default {
             await this.loadTableColumns(this.form.tablesTableId)
         },
 
+        /** Extract the channel_id query param from a YouTube feed URL (used when editing). */
+        extractYouTubeChannelId(url) {
+            if (!url) return ''
+            try {
+                return new URL(url).searchParams.get('channel_id') || ''
+            } catch { return '' }
+        },
+
+        onSourceTypeChange() {
+            // Clear URL test state when switching source types
+            this.urlTestResult = null
+            this.urlTestError  = null
+        },
+
         async onUrlBlur() {
             const url = this.form.url
             if (!url || !url.startsWith('http')) return
@@ -323,7 +421,13 @@ export default {
         validate() {
             const errs = []
             if (!this.form.name)    errs.push(this.t('webtrack', 'Name is required'))
-            if (!this.form.url)     errs.push(this.t('webtrack', 'URL is required'))
+            if (this.form.sourceType === 'custom' && !this.form.url) {
+                errs.push(this.t('webtrack', 'URL is required'))
+            }
+            if (this.form.sourceType === 'youtube' && !this.form.youtubeChannelId) {
+                errs.push(this.t('webtrack', 'Channel ID is required'))
+            }
+            // youtube_search: keyword is the search query, no URL or channel ID needed
             if (!this.form.keyword) errs.push(this.t('webtrack', 'Keyword is required'))
             return errs
         },
@@ -367,3 +471,13 @@ export default {
     },
 }
 </script>
+
+<style scoped>
+/* URL preview in Google News mode — allow long URLs to wrap */
+.wn-preview-url {
+    word-break: break-all;
+    font-family: monospace;
+    font-size: 0.8em;
+    max-height: none;
+}
+</style>
