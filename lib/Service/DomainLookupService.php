@@ -80,6 +80,13 @@ class DomainLookupService {
     public const CAT_OTHER         = 5;
     public const CAT_PODCAST       = 6;
 
+    // -------------------------------------------------------------------------
+    // Volume IDs
+    // -------------------------------------------------------------------------
+    public const VOLUME_EXCLUSIVE     = 0;  // keyword in title → dedicated/exclusive coverage
+    public const VOLUME_MAJOR_MENTION = 1;  // keyword mentioned 5+ times in body
+    public const VOLUME_MINOR_MENTION = 2;  // keyword mentioned 1–4 times in body
+
     /**
      * Domain → [country_id, tier_id] lookup table.
      * Seeded from ~1 500 historical PR Coverage rows.
