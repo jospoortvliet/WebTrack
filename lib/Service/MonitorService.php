@@ -339,7 +339,10 @@ class MonitorService {
         $tableColumns = [];
         if ($monitor->getTablesTableId() !== null) {
             try {
-                $tableColumns = $this->tablesService->getColumns($monitor->getTablesTableId());
+                $tableColumns = $this->tablesService->getColumnsForUser(
+                    $monitor->getTablesTableId(),
+                    $monitor->getUserId(),
+                );
                 // If the table exists but has no columns yet, bootstrap the PR
                 // Coverage schema automatically so the first match writes a row.
                 if ($tableColumns === []) {
@@ -350,7 +353,10 @@ class MonitorService {
                         $monitor->getTablesTableId(),
                         $monitor->getUserId(),
                     );
-                    $tableColumns = $this->tablesService->getColumns($monitor->getTablesTableId());
+                    $tableColumns = $this->tablesService->getColumnsForUser(
+                        $monitor->getTablesTableId(),
+                        $monitor->getUserId(),
+                    );
                 }
             } catch (\Throwable $e) {
                 $this->logger->warning('[webtrack] Could not load/init Tables columns for monitor {id}: {err}', [

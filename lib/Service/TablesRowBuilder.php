@@ -29,11 +29,13 @@ class TablesRowBuilder {
      *
      * @param array<array{id:int,title:string,type:string,selectionOptions:array<array{id:int,label:string}>}> $columns
      *   Full column schema as returned by TablesService::getColumns().
-     * @param Monitor $monitor   The monitor that triggered the match.
-     * @param string  $entryUrl  Article URL (also the feed entry ID).
-     * @param string  $title     Article title.
-     * @param string  $pubDate   Article publish date (any format parseable by strtotime).
-     * @param int|null $campaignId  Pre-set campaign selection ID (from monitor config).
+     * @param Monitor  $monitor      The monitor that triggered the match.
+     * @param string   $entryUrl     Article URL (also the feed entry ID).
+     * @param string   $title        Article title.
+     * @param string   $pubDate      Article publish date (any format parseable by strtotime).
+     * @param string   $body         Raw article body / feed description (HTML ok).
+     * @param int|null $campaignId   Pre-set campaign selection ID (from monitor config).
+     * @param string   $channelTitle YouTube channel name (youtube_search only).
      *
      * @return array<array{columnId:int,value:mixed}>
      */
@@ -43,7 +45,8 @@ class TablesRowBuilder {
         string  $entryUrl,
         string  $title,
         string  $pubDate,
-        ?int    $campaignId,
+        string  $body         = '',
+        ?int    $campaignId   = null,
         string  $channelTitle = '',
     ): array {
         // Index columns by normalised title for O(1) lookup.
@@ -70,6 +73,10 @@ class TablesRowBuilder {
         $safeTitle   = str_replace(['[', ']', '(', ')'], ['\\[', '\\]', '\\(', '\\)'], $title);
         $mdHeadline  = "[{$safeTitle}]({$entryUrl})";
 
+        // ── Volume detection ──────────────────────────────────────────────────
+        // Keyword is from the monitor configuration (the tracked search term).
+        $volumeId = $this->detectVolume($monitor->getKeyword(), $title, $body);
+
         // Column value resolvers — keyed by lowercase column title.
         $resolvers = [
             'date'         => $date,
@@ -79,10 +86,10 @@ class TablesRowBuilder {
             'tier'         => $tierId,
             'source'       => DomainLookupService::SOURCE_ORGANIC,
             'category'     => $categoryId,
+            'volume'       => $volumeId,
             'counter'      => 1,
             'actual/plan'  => null,    // leave empty
             'journalist'   => '',      // human review required
-            'volume'       => null,    // human review required
             'primary topic'=> null,    // human review required
             'comment'      => '',
             'campaign'     => $campaignId,
@@ -106,5 +113,36 @@ class TablesRowBuilder {
         }
 
         return $data;
+    }
+
+    /**
+     * Infers the "Volume" of coverage from how prominently the tracked keyword
+     * appears in the article:
+     *
+     *   Exclusive     — keyword appears in the headline (title)
+     *   Major mention — keyword appears 5 or more times in the body text
+     *   Minor mention — keyword appears 1–4 times in the body text
+     *
+     * Returns a DomainLookupService::VOLUME_* constant.
+     */
+    private function detectVolume(string $keyword, string $title, string $body): int {
+        if ($keyword === '') {
+            return DomainLookupService::VOLUME_MINOR_MENTION;
+        }
+
+        $lkw = mb_strtolower($keyword);
+
+        // Exclusive: keyword is in the article title.
+        if (mb_stripos($title, $lkw) !== false) {
+            return DomainLookupService::VOLUME_EXCLUSIVE;
+        }
+
+        // Count occurrences in the plain-text body.
+        $plainBody = strip_tags($body);
+        $count     = substr_count(mb_strtolower($plainBody), $lkw);
+
+        return $count >= 5
+            ? DomainLookupService::VOLUME_MAJOR_MENTION
+            : DomainLookupService::VOLUME_MINOR_MENTION;
     }
 }
