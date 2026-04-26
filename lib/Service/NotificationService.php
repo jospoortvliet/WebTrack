@@ -23,8 +23,11 @@ class NotificationService {
 
     /**
      * Send a "keyword found" notification and optionally post to Talk.
+     *
+     * @param string|null $articleUrl  Article URL, when available (feed sources).
+     *   Appended as a clickable Markdown link to the Talk message.
      */
-    public function notifyFound(Monitor $monitor, string $snippet): void {
+    public function notifyFound(Monitor $monitor, string $snippet, ?string $articleUrl = null): void {
         $this->sendNotification(
             $monitor->getUserId(),
             'keyword_found',
@@ -37,11 +40,22 @@ class NotificationService {
         );
 
         if ($monitor->getTalkRoomToken()) {
-            $message = $this->l->t('🔔 WebTrack: keyword "%1$s" found on %2$s — %3$s', [
-                $monitor->getKeyword(),
-                $monitor->getName(),
-                $snippet,
-            ]);
+            // For feed sources, embed the article URL as a Markdown link so
+            // readers can open the article directly from the Talk room.
+            if ($articleUrl !== null && $articleUrl !== '' && filter_var($articleUrl, FILTER_VALIDATE_URL)) {
+                $message = $this->l->t('🔔 WebTrack: keyword "%1$s" found on %2$s — [%3$s](%4$s)', [
+                    $monitor->getKeyword(),
+                    $monitor->getName(),
+                    $snippet,
+                    $articleUrl,
+                ]);
+            } else {
+                $message = $this->l->t('🔔 WebTrack: keyword "%1$s" found on %2$s — %3$s', [
+                    $monitor->getKeyword(),
+                    $monitor->getName(),
+                    $snippet,
+                ]);
+            }
             $this->postToTalkRoom($monitor->getTalkRoomToken(), $message, $monitor->getUserId());
         }
     }
