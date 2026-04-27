@@ -477,7 +477,7 @@ class MonitorService {
                 campaignId:   $monitor->getTablesCampaignId(),
                 channelTitle: $channelTitle,
             );
-            $this->tablesService->insertRow($monitor->getTablesTableId(), $data);
+            $this->tablesService->insertRowForUser($monitor->getTablesTableId(), $data, $monitor->getUserId());
             $this->logger->info('[webtrack] Tables row inserted for monitor {id}: {title}', [
                 'id'    => $monitor->getId(),
                 'title' => mb_substr($title, 0, 80),
