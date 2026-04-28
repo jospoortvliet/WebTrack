@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\WebTrack\Service;
 
 use OCP\Http\Client\IClientService;
+use OCP\IDBConnection;
 use OCP\IURLGenerator;
 use Psr\Log\LoggerInterface;
 
@@ -28,6 +29,7 @@ class TablesService {
         private IClientService  $clientService,
         private IURLGenerator   $urlGenerator,
         private LoggerInterface $logger,
+        private IDBConnection   $db,
     ) {
     }
 
@@ -262,49 +264,33 @@ class TablesService {
      * @param string $url              Article URL to look for
      */
     public function rowExistsForUrl(int $tableId, int $headlineColumnId, string $url): bool {
-        // PHP service path: RowService::findAllByTable takes userId explicitly.
-        if (class_exists('\OCA\Tables\Service\RowService')) {
-            try {
-                /** @var \OCA\Tables\Service\RowService $svc */
-                $svc  = \OCP\Server::get(\OCA\Tables\Service\RowService::class);
-                // We only need column $headlineColumnId and at most 1 row.
-                $rows = $svc->findAllByTable(
-                    tableId: $tableId,
-                    userId:  '',       // permission check skipped when empty (read-only)
-                    limit:   500,
-                    offset:  0,
-                );
-                foreach ($rows as $row) {
-                    foreach ($row->getData() ?? [] as $cell) {
-                        if ((int) ($cell['columnId'] ?? 0) === $headlineColumnId) {
-                            $val = (string) ($cell['value'] ?? '');
-                            if ($val !== '' && str_contains($val, $url)) {
-                                return true;
-                            }
-                        }
-                    }
-                }
-                return false;
-            } catch (\Throwable $e) {
-                $this->logger->warning('[webtrack] Tables PHP API (rowExists) failed, trying HTTP: ' . $e->getMessage());
-            }
-        }
-
-        // HTTP fallback.
+        // Direct DB query: check oc_tables_row_cells_text for a row in the
+        // target table whose Headline cell contains the URL.
+        //
+        // This approach is O(1) (indexed column_id lookup + LIKE on value),
+        // works in all execution contexts (web, CLI, background job), is not
+        // limited by a service-layer row-count cap, and requires no userId /
+        // permission workaround.
+        //
+        // The JOIN to oc_tables_row_sleeves restricts the search to the
+        // correct table (cells don't store table_id directly).
         try {
-            $rows = $this->searchRows(
-                tableId: $tableId,
-                filter: [[
-                    'columnId' => $headlineColumnId,
-                    'operator' => 'contains',
-                    'value'    => $url,
-                ]],
-                limit: 1,
-            );
-            return count($rows) > 0;
+            $qb = $this->db->getQueryBuilder();
+            $qb->select($qb->createFunction('1'))
+                ->from('tables_row_cells_text', 'c')
+                ->innerJoin('c', 'tables_row_sleeves', 's', $qb->expr()->eq('c.row_id', 's.id'))
+                ->where($qb->expr()->eq('s.table_id', $qb->createNamedParameter($tableId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($qb->expr()->eq('c.column_id', $qb->createNamedParameter($headlineColumnId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($qb->expr()->like('c.value', $qb->createNamedParameter('%' . $this->db->escapeLikeParameter($url) . '%')))
+                ->setMaxResults(1);
+
+            $result = $qb->executeQuery();
+            $exists = $result->fetchOne() !== false;
+            $result->closeCursor();
+            return $exists;
         } catch (\Throwable $e) {
-            $this->logger->warning('[webtrack] Tables rowExistsForUrl HTTP fallback also failed: ' . $e->getMessage());
-            return false;  // treat as "not duplicate" so insertion is still attempted
+            $this->logger->warning('[webtrack] rowExistsForUrl DB query failed (treating as not duplicate): ' . $e->getMessage());
+            return false;
         }
     }
 
